@@ -27,10 +27,16 @@ SUCCESS_KEYWORDS = [
 
 def luhn_checksum(card_number):
     def digits_of(n):
-        return [int(d) for d in str(n)]
+        # 核心修复：只转换纯数字字符，自动跳过类似 'l'、空格或 '-' 等杂质
+        return [int(d) for d in str(n) if d.isdigit()]
     
     card_str = str(card_number)
     digits = digits_of(card_str)
+    
+    # 如果过滤后什么都不剩，直接返回非0值表示校验失败
+    if not digits:
+        return -1 
+        
     odd_digits = digits[-1::-2]
     even_digits = digits[-2::-2]
     
@@ -598,12 +604,13 @@ def index():
 
 @app.route('/generate', methods=['POST'])
 def generate():
-    data = request.json
+    data = request.json or {}
     bin_input = data.get('bin', '')
     month = data.get('month', None)
     year = data.get('year', None)
     cvv = data.get('cvv', None)
     
+    # 1. 解析管道符 '|' 格式
     if '|' in bin_input:
         parts = bin_input.split('|')
         bin_prefix = parts[0]
@@ -616,16 +623,35 @@ def generate():
     else:
         bin_prefix = bin_input
     
-    if month == '':
-        month = None
-    if year == '':
-        year = None
-    if cvv == '':
-        cvv = None
+    # 2. 空字符串转换为 None
+    if month == '': month = None
+    if year == '': year = None
+    if cvv == '': cvv = None
     
+    # 3. 【核心修复】强制清洗数据，只保留数字，剔除类似 'l'、空格等隐蔽字符
+    bin_prefix = ''.join(c for c in str(bin_prefix) if c.isdigit())
+    
+    if month is not None:
+        month = ''.join(c for c in str(month) if c.isdigit())
+        if not month: month = None  # 如果洗完空了，回滚为 None
+        
+    if year is not None:
+        year = ''.join(c for c in str(year) if c.isdigit())
+        if not year: year = None
+        
+    if cvv is not None:
+        cvv = ''.join(c for c in str(cvv) if c.isdigit())
+        if not cvv: cvv = None
+
+    # 4. 基础业务防御：如果 BIN 码洗完直接空了，拒绝向下执行，防止底层算法抛错
+    if not bin_prefix:
+        return jsonify({'error': 'Invalid BIN prefix'}), 400
+    
+    # 5. 年份年份补全（在清洗干净之后处理，更安全）
     if year and len(str(year)) == 2:
         year = '20' + str(year)
     
+    # 6. 安全调用底层函数
     card = generate_card(bin_prefix, month, year, cvv)
     return jsonify({'card': card})
 
